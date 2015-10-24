@@ -1,0 +1,55 @@
+//VARIABLES DECLARATION AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+FUNCTION_BLOCK SafetyGate
+VAR_INPUT
+END_VAR
+
+VAR_OUTPUT
+	O_SG1_Enable: SAFEBOOL;
+	O_DiagReadyForReset:SAFEBOOL;
+	O_diagOperated:SAFEBOOL;
+END_VAR
+
+VAR
+		
+SafetyGate1: FS_SafetyGate_PLC;
+	I_SG1_CH1 AT %I* :SAFEBOOL;
+	I_SG1_CH2 AT %I* :SAFEBOOL;
+	I_Reset1 AT %I*:BOOL;
+	DiagInputNotValid:SAFEBOOL;
+	DiagSwitchError:SAFEBOOL;
+	DiagReadyForTest:SAFEBOOL;
+END_VAR
+
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+//PROGRAMING AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+CAL		SafetyGate1(
+	SwitchType := USINT#3,						//3 = 2 Channels NC
+	Input1 := I_SG1_CH1,							//Channel 1 (Cat3 = 2 NC channels)
+	Input1_Valid := TRUE,							//TRUE = Valid bit Always =1
+	Input2 := I_SG1_CH2,							//Channel 2 (Cat3 = 2 NC channels)
+	Input2_Valid := TRUE,							//TRUE = Valid bit Always =1
+	AutoStart := FALSE,							//Manual restart on Cold start
+	AutoReset := FALSE,							//Manual restart when the EmStop button is released
+	MonitoredReset := TRUE,						//TRUE = Falling edge to restart
+	StartupTest := FALSE,							//FALSE = StartUptest Deactivated
+	SimultaneityTime := T#300ms,
+	DelayTime := T#40ms,
+	Reset := I_Reset1,							//Signal to Reset 
+	Enable => O_SG1_Enable,						//¿SafetyGate OK?
+	DiagOperated => O_diagOperated, 
+	DiagReadyForReset => O_DiagReadyForReset,		//Reset Required
+	DiagReadyForTest => DiagReadyForTest,
+	DiagSwitchError => DiagSwitchError,
+	DiagInputNotValid => DiagInputNotValid
+	)
+
+	
+//For Category 4 according to EN ISO 13849-1: I_SG1_CH1 and I_SG1_CH2 must be wired to Test Pulses
+//Fix Test Pulses to these inputs using Hardware declaration tool of PAS4000.
+
+	END_FUNCTION_BLOCK
