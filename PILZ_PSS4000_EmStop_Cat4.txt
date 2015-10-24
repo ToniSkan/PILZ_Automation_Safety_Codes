@@ -1,0 +1,56 @@
+//VARIABLES DECLARATION AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+FUNCTION_BLOCK EmStop
+VAR_INPUT
+END_VAR
+
+VAR_OUTPUT
+	O_Emstop1_Enable:SAFEBOOL;
+	O_DiagReadyForReset:SAFEBOOL;
+	O_diagOperated:SAFEBOOL;
+END_VAR
+
+VAR
+EmStop1: FS_EmergencyStop_PLC;
+	I_Reset1 AT %I*:BOOL;
+	I_EmStop1_CH1 AT %I*:SAFEBOOL;
+	I_EmStop1_CH2 AT %I*:SAFEBOOL;
+	DiagInputNotValid:SAFEBOOL;
+	DiagSwitchError:SAFEBOOL;
+	DiagReadyForTest:SAFEBOOL;
+	
+	
+END_VAR
+
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+//PROGRAMING AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+//Emergency Stop Button 
+	CAL		EmStop1(
+	SwitchType := USINT#3,						//3 = 2 Channels NC
+	InputNC1 := I_EmStop1_CH1,					//Channel 1. (Cat3 = 2 NC channels )
+	InputNC1_Valid := TRUE,						//TRUE = Valid bit Always =1
+	InputNC2 := I_EmStop1_CH2,					//Channel 2. (Cat3 = 2 NC channels )
+	InputNC2_Valid := TRUE,						//TRUE = Valid bit Always =1
+	AutoStart := FALSE,							//Manual restart on Cold start
+	AutoReset := FALSE,							//Manual restart when the EmStop button is released
+	MonitoredReset := TRUE ,						//TRUE = Falling edge to restart
+	StartupTest := FALSE,							//FALSE = StartUptest Deactivated
+	SimultaneityTime := T#200ms,
+	DelayTime := T#40ms,
+	Reset := I_Reset1,							//Signal to Reset 
+	Enable => O_Emstop1_Enable,					//¿EmStop OK?
+	DiagOperated => O_diagOperated,
+	DiagReadyForReset => O_DiagReadyForReset,		//Reset Required
+	DiagReadyForTest => DiagReadyForTest,
+	DiagSwitchError => DiagSwitchError,
+	DiagInputNotValid => DiagInputNotValid
+	)
+	
+//For Category 4 according to EN ISO 13849-1: I_EmStop1_CH1 and I_EmStop1_CH2 must be wired to Test Pulses
+//Fix Test Pulses to these inputs using Hardware declaration tool of PAS4000.
+
+	END_FUNCTION_BLOCK
