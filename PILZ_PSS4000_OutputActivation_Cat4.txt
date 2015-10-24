@@ -1,0 +1,64 @@
+//VARIABLES DECLARATION AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+FUNCTION_BLOCK Outputs
+VAR_INPUT
+	I_EmStop1_State:SAFEBOOL;
+	I_SG1_State:SAFEBOOL;
+END_VAR
+VAR_OUTPUT
+	O_DiagFeedbackLoopError_KM1:SAFEBOOL;
+	O_DiagFeedbackLoopError_KM2:SAFEBOOL;
+END_VAR
+VAR
+	SafetyOK: SAFEBOOL;
+		
+	KM1_Activation: FS_OutputFBL_PLC;
+		I_KM1_Feedback AT %I* :SAFEBOOL;
+		O_KM1_Output AT %Q* :SAFEBOOL;
+		DiagFeedbackLoopNotValid_KM1:SAFEBOOL;
+		
+	KM2_Activation: FS_OutputFBL_PLC;
+		I_KM2_Feedback AT %I* :SAFEBOOL;
+		O_KM2_Output AT %Q* :SAFEBOOL;
+		DiagFeedbackLoopNotValid_KM2:SAFEBOOL;	
+END_VAR
+
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+//PROGRAMING AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+//LOGIC for the SAFETY state
+	LD		I_EmStop1_State
+	AND		I_SG1_State
+	ST		SafetyOK
+
+
+//Activation Relay KM1 
+	CAL		KM1_Activation(
+	Input := SafetyOK,							//Input to switch ON KM1
+	FeedbackLoop := I_KM1_Feedback,				//Input feedback KM1
+	FeedbackLoop_Valid := TRUE,					//TRUE= Valid always 1
+	FeedbackLoopTime := T#300ms,					//Feedback time
+	Output1 => O_KM1_Output,						//Output1 = KM1 Output activation //Output2 = NOT Used (Can be erased)
+	DiagFeedbackLoopError => O_DiagFeedbackLoopError_KM1,
+	DiagFeedbackLoopNotValid => DiagFeedbackLoopNotValid_KM1
+	)
+
+	//Activation Relay KM2
+	CAL		KM2_Activation(
+	Input := SafetyOK,							//Input to switch ON KM2
+	FeedbackLoop := I_KM2_Feedback,				//Input feedback KM2
+	FeedbackLoop_Valid := TRUE,					//TRUE= Valid always 1
+	FeedbackLoopTime := T#300ms,					//Feedback time
+	Output1 => O_KM2_Output,						//Output1 = KM2 Output activation
+	DiagFeedbackLoopError => O_DiagFeedbackLoopError_KM2,
+	DiagFeedbackLoopNotValid => DiagFeedbackLoopNotValid_KM2
+	)
+
+
+	//Relays KM1 and KM2 can be activated with only one call to FS_OutputFBL_PLC. But with to calls we have individual diagnostics for each relay
+	//Also the feedback inputs are not in series connection (Can be done by logic)
+
+END_FUNCTION_BLOCK
