@@ -1,0 +1,76 @@
+//VARIABLES DECLARATION AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+FUNCTION_BLOCK Analog
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+
+END_VAR
+VAR
+	LimitValue_Status_HIGHThreshold:SAFEBOOL;
+	
+AnalogeInput:FS_AnalogueInputSingle;
+	Analoge_DIAG_InputNotValid:SAFEBOOL;
+	Analoge_DIAG_RangeMonitoredError:SAFEBOOL;
+	Analoge_DIAG_ParameterError:SAFEBOOL;
+	Analoge_OVERRIDE:SAFEBOOL;
+	Analoge_VALUE:SAFEINT;
+	Analoge_ENABLE:SAFEBOOL;
+
+LimitValues: FS_LimitValueMonitoring;
+	LimiValue_Diag_ParamError:SAFEBOOL;
+END_VAR
+
+
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+//PROGRAMING AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+
+//ANALOG Function BLOCK 
+	//************************************************************************************************************************************
+	// This FB control the Analog current Value
+	// Monitors two Thresholds values = 10mA and 15mA and send the state of these Thresholds to Outputs[FB] to control lamps.
+	//************************************************************************************************************************************
+	CAL		AnalogeInput(
+	OverrideInput := FALSE,
+	InputType := FALSE,
+	LowLimit := INT#419,							//LowLimit = Low value detected by the Analog Sensor (In the cube 4.19mA=419)
+	HighLimit := INT#1870,						//HighLimit = High Value detected by the Analog Sensor (In the cube 18.70mA=1870)
+	ValueAtError := INT#0,
+	ValueAtOverride := INT#0,
+	MaxDurationOverride := T#30m,
+	RawRangeLow := INT#500,						//RawRangeLow = Low value to be monitored
+	RawRangeHigh := INT#1700,						//RawRangeHigh = High value to be monitored
+	ScaledRangeLow := INT#0,						//Scaled Low value (RawRangeLow(Analog) = SacaledRangeLow(Digital)
+	ScaledRangeHigh := INT#32000,					//Scaled High value (RawRangeHigh (Analog) = ScaledRangeHigh(Digital)
+	AutoReset := TRUE,
+	Reset := FALSE,
+	Enable => Analoge_ENABLE,
+	Value => Analoge_VALUE,						//SCALED VALUE
+	OverrideInputActive => Analoge_OVERRIDE,
+	DiagParameterError => Analoge_DIAG_ParameterError,
+	DiagRangeMonitoringError => Analoge_DIAG_RangeMonitoredError,
+	DiagInputNotValid => Analoge_DIAG_InputNotValid
+	)
+
+	//To monitor between 10mA and 15mA
+	//If 17mA = 32000 Then ---> 15mA=28235 and 10mA=18823
+	//DETECTION OF THE TWO THRESHOLDS:
+
+	CAL		LimitValues(
+	Value := Analoge_VALUE,
+	ResetValue := INT#18823,
+	SetValue := INT#28235,
+	MonitoringExceeding := FALSE,
+	Status => LimitValue_Status_HIGHThreshold,
+	DiagParameterError => LimiValue_Diag_ParamError
+	)
+
+	
+
+	
+
+	END_FUNCTION_BLOCK
