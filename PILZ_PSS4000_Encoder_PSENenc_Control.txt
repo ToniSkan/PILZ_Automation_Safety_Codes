@@ -1,0 +1,325 @@
+//VARIABLES DECLARATION AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+FUNCTION_BLOCK EncoderCONTROL
+VAR_INPUT
+END_VAR
+VAR_OUTPUT
+END_VAR
+VAR
+	
+RESET_INPUT 		AT%I* :BOOL;
+//OperationModeSetup_INPUT AT%I* :SAFEBOOL;
+//ReferencingStrokeLength_INPUT AT%I* :SAFEBOOL;
+
+//Instancia y Variables control de CH1 y Ch2 del PSENenco
+ABS_1: 	FS_AbsoluteEncoder;	
+	ENC_CH1_DiagInputNotValid:BOOL;
+	ENC_CH1_DiagReadyForReset:BOOL;
+	ENC_CH1_DiagModuleError:BOOL;
+	ENC_CH1_DiagDataFrameError:BOOL;
+	ENC_CH1_DiagInput:BOOL;
+	ENC_CH1_VALUE:UDINT;
+	ENC_CH1_VALUE_shifted:UDINT;
+	ENC_CH1_ValueValid:SAFEBOOL;
+
+
+ABS_2: FS_AbsoluteEncoder;
+	ENC_CH2_DiagInputNotValid:BOOL;
+	ENC_CH2_DiagReadyForReset:BOOL;
+	ENC_CH2_DiagModuleError:BOOL;
+	ENC_CH2_DiagDataFrameError:BOOL;
+	ENC_CH2_DiagInput:BOOL;
+	ENC_CH2_VALUE:UDINT;
+	ENC_CH2_VALUE_shifted:UDINT;
+	ENC_CH2_ValueValid:SAFEBOOL;
+
+//Instancia de las funciones ShiftPosition
+SHIFT_VALUE_CH1: FS_ShiftPositionRange;
+SHIFT_VALUE_CH2: FS_ShiftPositionRange;
+
+//Instancia de la funcion CounterDual
+ContadorEncoder: FS_CounterDual;
+	UnderFlow:SAFEBOOL;
+	OverFlow:SAFEBOOL;
+	Diag_inputNotValid:SAFEBOOL;
+	Diag_ReadyForReset:SAFEBOOL;
+	Diag_ParameterError:SAFEBOOL;
+	Diag_Error_Shaft_brocken:SAFEBOOL;
+	Diag_Error_Standstill:SAFEBOOL;
+	Diag_ToleranceExceeded:SAFEBOOL;
+	LastStatStopTime:SAFEUDINT;
+	DeltaValueMax:SAFEUDINT;
+	DeltaValue:SAFEUDINT;
+	Velocidad_Nula:SAFEBOOL;
+	Direccion_DOWN:SAFEBOOL;
+	Direccion_UP:SAFEBOOL;
+	Velocidiad:SAFEUDINT;
+	Safe_Position:SAFEUDINT;
+	Enable_Contador:SAFEBOOL;
+
+//Instancia de la funcion PositionToAngle
+PostionToAngle: FS_PositionToAngle;
+PosToAng_Enable:SAFEBOOL;
+PosToAng_Angle:SAFEUINT;
+PosToAng_DiagReferencingCompleted :SAFEBOOL;
+PosToAng_DiagMaxStrokeLengthOffset:SAFEBOOL;
+PosToAng_DiagPositionError:SAFEBOOL;
+PosToAng_DiagParameterError:SAFEBOOL;
+PosToAng_DiagOffsetError:SAFEBOOL;
+
+// Constant for PSEN enc m1/2 eCAM    (multiturn)
+	Singlepart:				SAFEDWORD := DWORD#2#00000000000000000001111111111111;	// mask single part
+	Multipart:				SAFEDWORD := DWORD#2#00000001111111111110000000000000;	// mask multi part
+	Errorbit_Mastersystem: 			DWORD := DWORD#2#00000000000000000000000001000000;	// mask errorbit ch1
+	Errorbit_Safetysystem: 			DWORD := DWORD#2#00000000000000000000000000100000;	// mask errorbit ch2
+	LiveCounter:   				DWORD := DWORD#2#00000000000000000000000000011111;	// mask live counter
+
+
+Encoder_Value_DWORD_1, LC_Master_temp, LC_Master_last_Cycle : DWORD;
+    Error_sensor_Mastersystem 			: BOOL;
+Encoder_Value_DWORD_2, LC_Safety_temp, LC_Safety_last_Cycle : DWORD;
+   	Error_sensor_Safetysystem 			: BOOL;
+     	
+   	
+   	ReadyForReset:BOOL;
+	Enable_OK:SAFEBOOL;
+	Error_Encoder:BOOL;  
+   	  
+       
+END_VAR
+
+
+
+//-------------------------------------------------------------------------------------------------------------------------------------------
+//PROGRAMING AREA CODE:
+//-------------------------------------------------------------------------------------------------------------------------------------------
+
+//************************************************************************************* 
+	// FUNCIÓN CONTROL ENCODER 
+	//*************************************************************************************
+	// TONI GUASCH SERRA | Versión: v1.0
+	// ------------------------------------------------------------------------------------
+	// Ejemplo para encoder Multivuelta PSENenc m1 Utilizando los canales Absolutos 
+	// Tipo de Encoder: Multitur PSEN enc m1/2 eCAM 
+	// Trasmission Rate_________________: 250kHz
+	// Gray code data format____________: FALSE
+	// Fault detection in the data frame: FALSE
+	// Input data length _______________: 32
+	// Resolución:CH1 13bits, CH2 8bits Vueltas: CH1 8192, CH2 8192 
+	// ------------------------------------------------------------------------------------
+	//Encoder data format:
+	// MMMMMMMMMMMM/SSSSSSSSSSSSS/E1/E2/LLLLL
+	// M :Multiturn value, 12bit
+	// S :Singleturn value, 13bit 
+	// E1:Error_ch1, 1bit
+	// E2:Error_ch2, 1bit
+	// L :Live counter, 5bit 
+	// ------------------------------------------------------------------------------------
+	// Funciones utilizadas: FS_AbsoluteEncoder (2x),FS_ShiftPositionRange (2x), FS_CounterDual,
+	// FS_PositionToangle
+	// ------------------------------------------------------------------------------------
+	// Function Inputs:
+	// Function Outputs:
+	// ------------------------------------------------------------------------------------
+	
+	//************************************************************************************* 
+	// LLamada función Control CH1 Encoder (FS_ABSOULTE_ENCODER)
+	// Function Inputs: HW PSSU E F ABS SSI (En Tabla de asignaciones)
+	// Function Outputs: "Value" (Valor contador 1) y "ValueValid"
+	// ------------------------------------------------------------------------------------
+	CAL		ABS_1(
+	CounterRange := USINT#32,						//Ancho de bits del contador
+	Inverse := FALSE,								//Inversión de la dirección de recuento (FALSE= Sin inversion)
+	AutoReset := TRUE,							//Tipo de Rearme (TRUE = Automático)
+	MonitoredReset := FALSE,						//Tipo de Flanco para el rearme (TRUE = FLanco descendente)
+	Reset := FALSE,								//Señal de REARME I-Variable
+	Reset_Valid := TRUE,							//Bit validación I-Variable Rearme
+	ValueValid => ENC_CH1_ValueValid,				//Validez del valor de entrada (TRUE=Valor de entrada válido)
+	Value => ENC_CH1_VALUE,						//SALIDA: Valor del contador de encoder ABS
+	DiagInputError => ENC_CH1_DiagInput,			//Diag entrada (TRUE=Sin valor de entrada)
+	DiagDataFrameError => ENC_CH1_DiagDataFrameError, //Diag marco de datos (TRUE=Error en el marco de datos)
+	DiagModuleError => ENC_CH1_DiagModuleError,	//Diag del módulo (TRUE=Módulo defectuoso)
+	DiagReadyForReset => ENC_CH1_DiagReadyForReset, //Diag Acuse de Recibo (TRUE=Módulo listo para rearme)
+	DiagInputNotValid => ENC_CH1_DiagInputNotValid //Diag Entradas (TRUE=1. Valor variable INPUT no es válido)
+	)
+
+	//------ CONTROL ERROR BIT ENCODER CH1-----------------------------------------------
+	UDINT_TO_DWORD(
+	IN := ENC_CH1_VALUE
+	)
+	ST		Encoder_Value_DWORD_1						// value [DWORD] 
+	AND		Errorbit_Mastersystem					// errorbit mask
+	EQ		Errorbit_Mastersystem						// errorbit ?
+	S		Error_sensor_Mastersystem
+	//------ CONTROL DEL Live counter CH1 ---------------------------------------------
+	LD		Encoder_Value_DWORD_1						// value [DWORD]
+	AND		LiveCounter								// Live counter mask
+	ST		LC_Master_temp
+	EQ		LC_Master_last_Cycle						// Live counter changed ?
+	S		Error_sensor_Mastersystem
+	LD		LC_Master_temp
+	ST		LC_Master_last_Cycle						// Liver counter saving
+	
+	LD		RESET_INPUT
+	R		Error_sensor_Mastersystem
+
+	// ------------------------------------------------------------------------------------
+	//LLamada función Control CH2 Encoder (FS_ABSOULTE_ENCODER)
+	// Function Inputs: HW PSSU E F ABS SSI (En Tabla de asignaciones)
+	// Function Outputs: "Value" (Valor contador 1) y "ValueValid"
+	// ------------------------------------------------------------------------------------
+	CAL		ABS_2(
+	CounterRange := USINT#32,						//Ancho de bits del contador
+	Inverse := FALSE,								//Inversión de la dirección de recuento (FALSE= Sin inversion)
+	AutoReset := TRUE,							//Tipo de Rearme (TRUE = Automático)
+	MonitoredReset := FALSE,						//Tipo de Flanco para el rearme (TRUE = FLanco descendente)
+	Reset := FALSE,								//Señal de REARME I-Variable
+	Reset_Valid := TRUE,							//Bit validación I-Variable Rearme
+	ValueValid => ENC_CH2_ValueValid,				//Validez del valor de entrada (TRUE=Valor de entrada válido)
+	Value => ENC_CH2_VALUE,						//SALIDA: Valor del contador de encoder ABS
+	DiagInputError => ENC_CH2_DiagInput,			//Diag entrada (TRUE=Sin valor de entrada)
+	DiagDataFrameError => ENC_CH2_DiagDataFrameError, //Diag marco de datos (TRUE=Error en el marco de datos)
+	DiagModuleError => ENC_CH2_DiagModuleError,	//Diag del módulo (TRUE=Módulo defectuoso)
+	DiagReadyForReset => ENC_CH2_DiagReadyForReset, //Diag Acuse de Recibo (TRUE=Módulo listo para rearme)
+	DiagInputNotValid => ENC_CH2_DiagInputNotValid //Diag Entradas (TRUE=1. Valor variable INPUT no es válido)
+	)
+	//------ CONTROL ERROR BIT ENCODER CH2-----------------------------------------------
+	UDINT_TO_DWORD(
+	IN := ENC_CH2_VALUE
+	)
+	ST		Encoder_Value_DWORD_2						// value [DWORD]
+	AND		Errorbit_Safetysystem					// errorbit mask
+	EQ		Errorbit_Safetysystem						// errorbit ?
+	S		Error_sensor_Safetysystem
+	//------ CONTROL DEL Live counter CH2 ---------------------------------------------
+	LD		Encoder_Value_DWORD_2						// value [DWORD]
+	AND		LiveCounter								// Live counter mask
+	ST		LC_Safety_temp
+	EQ		LC_Safety_last_Cycle						// Live counter changed ?
+	S		Error_sensor_Mastersystem
+	LD		LC_Safety_temp
+	ST		LC_Safety_last_Cycle						// Liver counter saving 
+
+	LD		RESET_INPUT
+	R		Error_sensor_Safetysystem 
+		
+	//*************************************************************************************
+	// LLamada función Shift Position para CH1 y CH2 (FS_SHIFT_POSITIONRANGE)
+	// Shift 7 bits para PSENenc1
+	// Function Inputs: "Value" FS_AbsoluteEncoder para CH1 y CH2 (ENC_CH1_VALUE, SHIFT_VALUE_CH2)
+	// Function Outputs: "ValueOut" (ENC_CH1_VALUE_shifted, ENC_CH2_VALUE_shifted)
+	// ------------------------------------------------------------------------------------
+	CAL		SHIFT_VALUE_CH1(
+	ValueIn := ENC_CH1_VALUE,						//ENTRADA. Valor a desplazar
+	N := USINT#7,									//Nº de bits de desplazamiento
+	ValueOut => ENC_CH1_VALUE_shifted				//SALIDA: Valor desplazado
+	)
+
+	CAL		SHIFT_VALUE_CH2( 
+	ValueIn := ENC_CH2_VALUE,						//ENTRADA. Valor a desplazar 
+	N := USINT#7,									//Nº de bits de desplazamiento
+	ValueOut => ENC_CH2_VALUE_shifted				//SALIDA: Valor desplazado
+	)
+	//************************************************************************************* 
+	// LLamada función Contador 2 canales (FS_COUNTERDUAL)
+	// Function Inputs:ENC_CH1_VALUE_shifted, ENC_CH1_ValueValid, ENC_CH2_VALUE_shifted, ENC_CH2_ValueValid
+	// Function Outputs: ENABLE(Enable_Contador),VALUE(Safe_Position),Speed(Velocidiad), Standstill(Velocidad_Nula)
+	// CountingUp(Direccion_UP ), CountingDown(Direccion_DOWN)
+	// ------------------------------------------------------------------------------------
+	CAL		ContadorEncoder(
+	Value1 := ENC_CH1_VALUE_shifted,				//ENTRADA. Valor del contador CH1
+	Value1Valid := ENC_CH1_ValueValid,			//Validez contador CH1 (TRUE=Valor valido)
+	Value2 := ENC_CH2_VALUE_shifted,				//ENTRADA. Valor del contador CH2
+	Value2Valid := ENC_CH2_ValueValid,			//Validez contador CH2 (TRUE=Valor valido)
+	SelectValue2 := FALSE,						//Emitir en la O-Variable VALUE el valor de contador1 o 2 (FALSE = contador1)
+	CounterRange := USINT#13,						//Ancho de bits del contador (PSEN emc1 entrega 13 bits)
+	SpeedMovingAverage := USINT#1,				//Numero de valores para el valor medio flotante (=1 = Sin formación de valor medio
+	Offset := USINT#0,							//Desplazamiento de punto 0 entre valor contador1 y contador2 (=0 Sin offset)
+	//****Scale := input9, //Escala del valor de CONTADOR2(default=1)
+	Reverse := TRUE,								//inversion de la dirección de giro del valor de contador2 (TRUE = contador 1 y 2 direcciones de giro contrarias)
+	Tolerance := UINT#500,						//Diferencia admisible entre CONTADOR1 y CONTADOR2 (determinar valor durante funcionamiento,ajustar al minimo)
+	ToleranceTime := TIME#20ms,					//Duración admisible del rebase por exceso de la tolerancia (determinar valor durante funcionamiento,ajustar al minimo)
+	Drive := FALSE,								//SEñal de deteccion de orden de desplazamiento/parada (FALSE=Sin orden de desplazamiento)
+	DriveValid := TRUE,							//Bit validación I-Variable DRIVE
+	ThresholdStandStill := UINT#20,				//Valor umbral detección de parada
+	ThresholdDrive := UINT#0,						//Valor umbral detección de orden de desplazamiento
+	StandStillTime := TIME#500ms,					//Tiempo de retardo para deteccion parada
+	DriveTime := TIME#250ms,						//Tiempo de retardo para la detección de orden de desplazamiento
+	ThresholdDirection := UINT#15,				//Valor umbral para el cambio de dirección. En parada= Nº de incrementos en una direccion hasta recuento. En marcha= Nº de incrementos contrarios hasta visualizar cambio de direccion
+	NoDriveMonitoring := TRUE,					//Desactivación de la detección de orden de desplazamiento (TRUE=Deteccion de orden de desplazamiento)
+	AutoReset := FALSE,							//Acuse automático (FALSE=Rearme Manual)
+	MonitoredReset := TRUE,						//Tipo de flanco para acuse con parámetro de entrada Reset (TRUE=FLanco descendente)
+	Reset := RESET_INPUT,							//Señal I-Variable para acuse según AutoReset, (TRUE=MonitoredReset)
+	Enable => Enable_Contador,					//SALIDA. ENABLE DE LA FUNCION. 0=HAY ERRORES, 1=free of error
+	Value => Safe_Position,						//VALOR DE SALIDA VALUE. Valor del contador que depende de la I-Variable SelectValue2 y limitado por CounterRange
+	// position 0..8192 increments
+	Speed => Velocidiad,							//SALIDA. Valor medio flotante de velocidad en unidades por segundo. Depende de SelectValue2 y con SpeedMovingAverage se define la foramcion del valor medio
+	// increments per seconds
+	CountingUp => Direccion_UP,					//Dirección de recuento ascendente 0= Valores Value No Aumentan, 1= si aumentan. Thresholddirection ajusta su sensibilidad. 
+	CountingDown => Direccion_DOWN,				//Dirección de recuento descendente 0= Valores Value No descienten, 1= si descienden. Thresholddirection ajusta su sensibilidad. 
+	Standstill => Velocidad_Nula,					//SALIDA. Deteccion de Parada
+	DeltaValue => DeltaValue,						//Diferencia entre contador 1 y 2
+	DeltaValueMax => DeltaValueMax,				//Diferencia máxima generada entre el valor de contador 1 y 2
+	LastStartStopTime => LastStatStopTime,		//Tiempo de arranque o tiempo de rodaje en inercia en ms 
+	Underflow => UnderFlow,						//Desbordamiento por defecto del contador
+	Overflow => OverFlow,							//Desbordamiento por exceso del contador
+	DiagToleranceExceeded => Diag_ToleranceExceeded, //Diferencia admisible entre valores de contador (tolerancia) superada por exceso (1=TOLERANCIA SUPERADA)
+	DiagStandstillError => Diag_Error_Standstill,	//Información de diagnóstico detección de parada (1=ERROR EN DETECCIÓN DE PARADA)
+	DiagDriveError => Diag_Error_Shaft_brocken,	//Información de diagnóstico detección de orden de desplazamiento (1=ERROR EN LA DETECCION DE ORDEN DE DESPLAZ.)
+	DiagParameterError => Diag_ParameterError,	//Información de diagnóstico parametrización (1=ERROR EN LA PARAMETRIZACION)
+	DiagReadyForReset => Diag_ReadyForReset,		//Información de diagnóstico acuse de recibo (0=PREPARADO PARA RESET)(1=un valor de las I-variables Value1, Value2 o Drive no es válido, bit de validación Value1Valid o Value2Valid o DriveValid = FALSE)
+	DiagInputNotValid => Diag_inputNotValid		//Información de diagnóstico entrada
+	)
+	
+	
+	//************************************************************************************* 
+	// LLamada función Posición a Ángulo (FS_POSITIONTOANGLE)
+	// Function Inputs: Value FS_CounterDual (Value = Safe_Position)
+	// Function Outputs:Enable(PsToAng_Enable), Angle(PosToAng_Angle)
+	// ------------------------------------------------------------------------------------
+	CAL		PostionToAngle(
+	Position := Safe_Position,					//ENTRADA Valor Safe Position de FS_CounterDual
+	PositionRange := UDINT#8192,					//Resolución del encoder Absoluto utilizado
+	MountingEncoderOffset := UINT#1,				//Offset de Montaje del Encoder. Ajuste de posición zero
+	OperationModeSetup :=FALSE,					//Prensa en modo de ajuste (FALSE=No en modo ajuste PRENSAS)
+	ReferencingStrokeLength :=FALSE,				//Referenciado debido a cambio de longitud de carrera, (FALSE= Referenciado no se inicia PRENSAS)
+	MaxStrokeLengthOffset := UINT#0,				//Maximo offset admisible de Ajuste de longitud de carrera (PRENSAS)
+	ReferencingBDC :=FALSE,						//Base para procesos de referenciado (OU o UU PRENSAS) 
+	Enable => PosToAng_Enable,					//SALIDA. ENABLE DE LA FUNCION. 0=HAY ERRORES, 1=free of error
+	Angle => PosToAng_Angle,						//SALIDA. Valor de posición escalado como ángulo
+	// 0...3599= 000,0 up to 359,9 degrees
+	DiagReferencingCompleted =>PosToAng_DiagReferencingCompleted, //Info. Diagnostico Estado del proceso de referenciado para determianr Offset de ajuste de longitud de carrera (FALSE = Sin proceso de referenciado, TRUE=proceso completado)
+	DiagMaxStrokeLengthOffset =>PosToAng_DiagMaxStrokeLengthOffset, //Info. Diagnostico Supervisión del offset máximo admisible de ajuste de longitud de carrera (FALSE= SIn rebase por exceso, TRUE =superado por exceso)
+	DiagPositionError => PosToAng_DiagPositionError, //Info. Diagnostico Supervision del valor de posición (FALSE=sin errores, TRUE=Position fuera del rango programado )
+	DiagParameterError =>PosToAng_DiagParameterError, //Info. Diagnostico Supervisio I-Variables (FALSE=Sin errores de supervision, TRUE=I-Variables tienen valores de validos
+	DiagOffsetError => PosToAng_DiagOffsetError	//Info. Diagnostico Supervisión del offset de ajuste de longitud de carrera (FALSE=offset de ajuste de longitud de carrera válido, TRUE=No válido)
+	)
+	//************************************************************************************* 
+	
+	
+	
+	// ---------- DIAGNOSTIO ErrorEncoder ----------------------------------------------------
+	LD		ENC_CH1_DiagModuleError 
+	OR		ENC_CH2_DiagModuleError
+	OR		ENC_CH1_DiagInputNotValid 
+	OR		ENC_CH2_DiagInputNotValid
+	OR		Error_sensor_Mastersystem 
+	OR		Error_sensor_Safetysystem
+	OR		Diag_ToleranceExceeded 
+	ST		Error_Encoder
+	// ---------- DIAGNOSTICO Enable ------------------------------------------------------
+	LD		ENC_CH1_ValueValid						// enable interface module Mastersystem
+	AND		ENC_CH2_ValueValid						// Enable interface module Safetysystem
+	AND		Enable_Contador							// enable CounterDual
+	ANDN	Error_Encoder
+	ST		Enable_OK 
+	// ---------- DIAGNOSTICO ReadyForReset -----------------------------------------
+	LD		ENC_CH1_DiagReadyForReset
+	OR		ENC_CH2_DiagReadyForReset
+	OR		Diag_ReadyForReset
+	ST		ReadyForReset
+	
+	
+
+	END_FUNCTION_BLOCK
